@@ -7,6 +7,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Activity Tracker">
     <title>Activity Tracker</title>
+    
+    <!-- App Icons - Replace these URLs with your own icon images -->
+    <link rel="apple-touch-icon" sizes="180x180" href="app-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="app-icon.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="app-icon.png">
+    
+    <!-- You can also use a direct emoji/text icon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    
     <style>
         * {
             margin: 0;
@@ -246,6 +255,46 @@
             background: #dbeafe;
         }
         
+        .calendar {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+            margin-top: 1rem;
+        }
+        
+        .calendar-header {
+            text-align: center;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #666;
+            padding: 0.25rem;
+        }
+        
+        .calendar-day {
+            aspect-ratio: 1;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            padding: 0.25rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            background: white;
+            position: relative;
+        }
+        
+        .calendar-day:hover {
+            background: #f9fafb;
+        }
+        
+        .calendar-day.empty {
+            background: transparent;
+            border: none;
+            cursor: default;
+        }
+        
+        .calendar-day.has-data {
+            background: #dbeafe;
+        }
+        
         .entry-list {
             max-height: 400px;
             overflow-y: auto;
@@ -320,6 +369,64 @@
             font-size: 0.875rem;
             color: #666;
         }
+        
+        .timeline-container {
+            margin-top: 1rem;
+            position: relative;
+        }
+        
+        .timeline-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        
+        .timeline-hour {
+            display: flex;
+            border-bottom: 1px solid #e5e7eb;
+            min-height: 40px;
+        }
+        
+        .timeline-hour:last-child {
+            border-bottom: none;
+        }
+        
+        .timeline-hour-label {
+            width: 60px;
+            flex-shrink: 0;
+            padding: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #666;
+            background: #f9fafb;
+            border-right: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+        }
+        
+        .timeline-hour-content {
+            flex: 1;
+            position: relative;
+            background: white;
+        }
+        
+        .timeline-activity {
+            position: absolute;
+            left: 0;
+            right: 0;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            color: white;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
 <body>
@@ -339,13 +446,14 @@
                         <input type="date" id="entryDate">
                     </div>
                     <div class="form-group">
-                        <label>Time</label>
-                        <input type="time" id="entryTime">
+                        <label>Start Time</label>
+                        <input type="time" id="entryStartTime">
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Duration (minutes)</label>
-                    <input type="number" id="entryDuration" value="30" min="1">
+                    <label>End Time</label>
+                    <input type="time" id="entryEndTime">
+                    <div id="durationDisplay" style="font-size: 0.875rem; color: #666; margin-top: 0.25rem;"></div>
                 </div>
                 <div class="form-group">
                     <label>Subject</label>
@@ -376,8 +484,8 @@
             <div class="card">
                 <h2 class="card-title">📅 Daily View</h2>
                 <div class="view-toggle">
-                    <button class="active" onclick="setView('chart')" id="chartBtn">Chart</button>
-                    <button class="inactive" onclick="setView('calendar')" id="calendarBtn">Calendar</button>
+                    <button class="active" onclick="setView('chart')" id="chartBtn">Summary</button>
+                    <button class="inactive" onclick="setView('timeline')" id="timelineBtn">Timeline</button>
                 </div>
                 
                 <div id="chartView">
@@ -388,11 +496,12 @@
                     <div id="chartDisplay"></div>
                 </div>
                 
-                <div id="calendarView" style="display: none;">
+                <div id="timelineView" style="display: none;">
                     <div class="form-group">
-                        <input type="month" id="calendarMonth">
+                        <label>Select Date</label>
+                        <input type="date" id="timelineDate">
                     </div>
-                    <div id="calendarDisplay"></div>
+                    <div id="timelineDisplay"></div>
                 </div>
             </div>
         </div>
@@ -453,9 +562,47 @@
         
         // Initialize
         document.getElementById('entryDate').valueAsDate = new Date();
-        document.getElementById('entryTime').value = new Date().toTimeString().slice(0, 5);
+        document.getElementById('entryStartTime').value = '';
+        document.getElementById('entryEndTime').value = new Date().toTimeString().slice(0, 5);
         document.getElementById('queryDate').valueAsDate = new Date();
-        document.getElementById('calendarMonth').value = new Date().toISOString().slice(0, 7);
+        document.getElementById('timelineDate').valueAsDate = new Date();
+        
+        // Calculate duration when times change
+        function updateDuration() {
+            const startTime = document.getElementById('entryStartTime').value;
+            const endTime = document.getElementById('entryEndTime').value;
+            const display = document.getElementById('durationDisplay');
+            
+            if (startTime && endTime) {
+                const [startHour, startMin] = startTime.split(':').map(Number);
+                const [endHour, endMin] = endTime.split(':').map(Number);
+                
+                let duration = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+                
+                // Handle next day (if end time is before start time)
+                if (duration < 0) {
+                    duration += 24 * 60;
+                }
+                
+                const hours = Math.floor(duration / 60);
+                const minutes = duration % 60;
+                
+                if (hours > 0) {
+                    display.textContent = `Duration: ${hours}h ${minutes}m (${duration} minutes)`;
+                } else {
+                    display.textContent = `Duration: ${minutes} minutes`;
+                }
+                display.style.color = '#10b981';
+                display.style.fontWeight = '500';
+            } else {
+                display.textContent = '';
+            }
+        }
+        
+        document.getElementById('entryStartTime').addEventListener('change', updateDuration);
+        document.getElementById('entryEndTime').addEventListener('change', updateDuration);
+        document.getElementById('entryStartTime').addEventListener('input', updateDuration);
+        document.getElementById('entryEndTime').addEventListener('input', updateDuration);
         
         // Load data from localStorage
         const stored = localStorage.getItem('activityTrackerData');
@@ -522,11 +669,34 @@
                 return;
             }
             
+            const startTime = document.getElementById('entryStartTime').value;
+            const endTime = document.getElementById('entryEndTime').value;
+            
+            if (!startTime || !endTime) {
+                alert('Please enter both start and end times');
+                return;
+            }
+            
+            // Calculate duration
+            const [startHour, startMin] = startTime.split(':').map(Number);
+            const [endHour, endMin] = endTime.split(':').map(Number);
+            let duration = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+            
+            if (duration < 0) {
+                duration += 24 * 60; // Handle next day
+            }
+            
+            if (duration === 0) {
+                alert('End time must be different from start time');
+                return;
+            }
+            
             const entry = {
                 id: Date.now(),
                 date: document.getElementById('entryDate').value,
-                time: document.getElementById('entryTime').value,
-                duration: parseInt(document.getElementById('entryDuration').value),
+                time: startTime,
+                endTime: endTime,
+                duration: duration,
                 subject: subject,
                 notes: document.getElementById('entryNotes').value,
                 rating: currentRating
@@ -537,8 +707,9 @@
             
             // Reset form
             document.getElementById('entryDate').valueAsDate = new Date();
-            document.getElementById('entryTime').value = new Date().toTimeString().slice(0, 5);
-            document.getElementById('entryDuration').value = 30;
+            document.getElementById('entryStartTime').value = '';
+            document.getElementById('entryEndTime').value = new Date().toTimeString().slice(0, 5);
+            document.getElementById('durationDisplay').textContent = '';
             document.getElementById('entrySubject').value = '';
             document.getElementById('newSubject').value = '';
             document.getElementById('newSubject').style.display = 'none';
@@ -587,16 +758,16 @@
             currentView = view;
             document.getElementById('chartBtn').classList.toggle('active', view === 'chart');
             document.getElementById('chartBtn').classList.toggle('inactive', view !== 'chart');
-            document.getElementById('calendarBtn').classList.toggle('active', view === 'calendar');
-            document.getElementById('calendarBtn').classList.toggle('inactive', view !== 'calendar');
+            document.getElementById('timelineBtn').classList.toggle('active', view === 'timeline');
+            document.getElementById('timelineBtn').classList.toggle('inactive', view !== 'timeline');
             
             document.getElementById('chartView').style.display = view === 'chart' ? 'block' : 'none';
-            document.getElementById('calendarView').style.display = view === 'calendar' ? 'block' : 'none';
+            document.getElementById('timelineView').style.display = view === 'timeline' ? 'block' : 'none';
             
             if (view === 'chart') {
                 updateChart();
             } else {
-                updateCalendar();
+                updateTimeline();
             }
         }
         
@@ -637,36 +808,78 @@
             chartDisplay.innerHTML = html;
         }
         
-        function updateCalendar() {
-            const monthValue = document.getElementById('calendarMonth').value;
-            const [year, month] = monthValue.split('-').map(Number);
-            const firstDay = new Date(year, month - 1, 1);
-            const lastDay = new Date(year, month, 0);
-            const daysInMonth = lastDay.getDate();
-            const startDayOfWeek = firstDay.getDay();
+        function updateTimeline() {
+            const date = document.getElementById('timelineDate').value;
+            const dayEntries = entries.filter(e => e.date === date);
             
-            let html = '<div class="calendar">';
-            ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
-                html += `<div class="calendar-header">${day}</div>`;
+            const timelineDisplay = document.getElementById('timelineDisplay');
+            
+            if (dayEntries.length === 0) {
+                timelineDisplay.innerHTML = '<div class="empty-state">No activities for selected date</div>';
+                return;
+            }
+            
+            // Sort entries by start time
+            const sortedEntries = [...dayEntries].sort((a, b) => {
+                const [aH, aM] = a.time.split(':').map(Number);
+                const [bH, bM] = b.time.split(':').map(Number);
+                return (aH * 60 + aM) - (bH * 60 + bM);
             });
             
-            for (let i = 0; i < startDayOfWeek; i++) {
-                html += '<div class="calendar-day empty"></div>';
-            }
+            const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+            const subjectColors = {};
+            let colorIndex = 0;
             
-            for (let day = 1; day <= daysInMonth; day++) {
-                const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const dayEntries = entries.filter(e => e.date === dateStr);
-                const hasData = dayEntries.length > 0;
-                const totalMins = dayEntries.reduce((sum, e) => sum + e.duration, 0);
+            sortedEntries.forEach(entry => {
+                if (!subjectColors[entry.subject]) {
+                    subjectColors[entry.subject] = colors[colorIndex % colors.length];
+                    colorIndex++;
+                }
+            });
+            
+            let html = '<div class="timeline-container"><div class="timeline-grid">';
+            
+            for (let hour = 0; hour < 24; hour++) {
+                const hourLabel = hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`;
                 
-                html += `<div class="calendar-day ${hasData ? 'has-data' : ''}" onclick="selectCalendarDay('${dateStr}')">
-                    ${day}${hasData ? `<br><small>${totalMins}m</small>` : ''}
-                </div>`;
+                html += `<div class="timeline-hour">
+                    <div class="timeline-hour-label">${hourLabel}</div>
+                    <div class="timeline-hour-content">`;
+                
+                sortedEntries.forEach(entry => {
+                    const [startH, startM] = entry.time.split(':').map(Number);
+                    const [endH, endM] = entry.endTime ? entry.endTime.split(':').map(Number) : [startH, startM + entry.duration];
+                    
+                    const startMinutes = startH * 60 + startM;
+                    const endMinutes = endH * 60 + endM;
+                    const hourStart = hour * 60;
+                    const hourEnd = (hour + 1) * 60;
+                    
+                    if (startMinutes < hourEnd && endMinutes > hourStart) {
+                        const visibleStart = Math.max(startMinutes, hourStart);
+                        const visibleEnd = Math.min(endMinutes, hourEnd);
+                        const topPercent = ((visibleStart - hourStart) / 60) * 100;
+                        const heightPercent = ((visibleEnd - visibleStart) / 60) * 100;
+                        
+                        html += `<div class="timeline-activity" style="
+                            top: ${topPercent}%;
+                            height: ${heightPercent}%;
+                            background: ${subjectColors[entry.subject]};
+                        ">${entry.subject}</div>`;
+                    }
+                });
+                
+                html += `</div></div>`;
             }
             
-            html += '</div>';
-            document.getElementById('calendarDisplay').innerHTML = html;
+            html += '</div></div>';
+            
+            const totalMinutes = sortedEntries.reduce((sum, e) => sum + e.duration, 0);
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            html += `<div class="total-display">Total: ${hours}h ${minutes}m (${totalMinutes} minutes)</div>`;
+            
+            timelineDisplay.innerHTML = html;
         }
         
         function selectCalendarDay(date) {
@@ -708,7 +921,7 @@
                             <div>
                                 <div class="entry-title">${entry.subject}</div>
                                 <div class="entry-meta">
-                                    📅 ${entry.date} | ⏰ ${entry.time} (${entry.duration} min)
+                                    📅 ${entry.date} | ⏰ ${entry.time}${entry.endTime ? ' - ' + entry.endTime : ''} (${entry.duration} min)
                                 </div>
                             </div>
                             <div style="color: #fbbf24; font-size: 1.25rem;">${stars}</div>
@@ -722,10 +935,11 @@
         }
         
         function exportCSV() {
-            const headers = ['Date', 'Time', 'Duration (min)', 'Subject', 'Rating', 'Notes'];
+            const headers = ['Date', 'Start Time', 'End Time', 'Duration (min)', 'Subject', 'Rating', 'Notes'];
             const rows = entries.map(e => [
                 e.date,
                 e.time,
+                e.endTime || '',
                 e.duration,
                 e.subject,
                 e.rating,
@@ -751,16 +965,17 @@
                     const lines = e.target.result.split('\n').slice(1);
                     const imported = lines.filter(line => line.trim()).map(line => {
                         const matches = line.match(/(".*?"|[^,]+)(?=\s*,|\s*$)/g);
-                        if (!matches || matches.length < 5) return null;
+                        if (!matches || matches.length < 6) return null;
                         
                         return {
                             id: Date.now() + Math.random(),
                             date: matches[0].trim(),
                             time: matches[1].trim(),
-                            duration: parseInt(matches[2].trim()),
-                            subject: matches[3].trim(),
-                            rating: parseInt(matches[4].trim()),
-                            notes: matches[5] ? matches[5].replace(/^"|"$/g, '').replace(/""/g, '"') : ''
+                            endTime: matches[2].trim(),
+                            duration: parseInt(matches[3].trim()),
+                            subject: matches[4].trim(),
+                            rating: parseInt(matches[5].trim()),
+                            notes: matches[6] ? matches[6].replace(/^"|"$/g, '').replace(/""/g, '"') : ''
                         };
                     }).filter(e => e !== null);
                     
@@ -812,7 +1027,7 @@
         
         // Update chart when date changes
         document.getElementById('queryDate').addEventListener('change', updateChart);
-        document.getElementById('calendarMonth').addEventListener('change', updateCalendar);
+        document.getElementById('timelineDate').addEventListener('change', updateTimeline);
     </script>
 </body>
 </html>
